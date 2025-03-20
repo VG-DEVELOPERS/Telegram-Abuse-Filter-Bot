@@ -122,7 +122,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(warning_text)
 
 async def admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1 or context.args[0] not in ["on", "off"]:
+    if not context.args:
+        await update.message.reply_text("❌ Usage: /admin on OR /admin off")
+        return
+
+    command = context.args[0].lower()
+    if command not in ["on", "off"]:
         await update.message.reply_text("❌ Usage: /admin on OR /admin off")
         return
 
@@ -133,12 +138,12 @@ async def admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Only **group owner** or **allowed users** can use this command!")
         return
 
-    filtering = context.args[0] == "on"
+    filtering = command == "on"
     await groups_collection.update_one({"group_id": chat_id}, {"$set": {"filtering": filtering}}, upsert=True)
 
     status = "✅ Abuse filtering is now **ENABLED**!" if filtering else "❌ Abuse filtering is now **DISABLED**!"
     await update.message.reply_text(status, parse_mode="Markdown")
-
+    
 async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
         await update.message.reply_text("❌ Reply to a user's message to authorize them.")
@@ -179,7 +184,7 @@ async def unauth(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin_control, pass_args=True))
+    app.add_handler(CommandHandler("admin", admin_control))
     app.add_handler(CommandHandler("auth", auth))
     app.add_handler(CommandHandler("unauth", unauth))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_group))
