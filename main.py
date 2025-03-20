@@ -100,7 +100,7 @@ async def detect_nsfw(update: Update, context: ContextTypes.DEFAULT_TYPE):
         },
     ).json()
 
-    if response["nudity"]["raw"] > 0.7:
+    if response.get("nudity", {}).get("raw", 0) > 0.7:
         await update.message.delete()
         await update.message.chat.send_message(
             f"❌ NSFW content removed! [User](tg://openmessage?user_id={update.message.from_user.id})",
