@@ -4,7 +4,7 @@ import os
 import random
 import re
 from telegram import Update, ChatMember, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 import telegram.error
 from dotenv import load_dotenv
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 OWNER_ID = 7563434309  
-ALLOWED_USERS = {OWNER_ID, 123456789, 987654321}  
+ALLOWED_USERS = {OWNER_ID, 7717913705, 987654321}  
 
 GROUPS_FILE = "groups.txt"
 ABUSE_FILE = "abuse.txt"
@@ -105,6 +105,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(start_message, parse_mode="Markdown", reply_markup=reply_markup)
 
+async def help_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    help_text = (
+        "📖 **Help Guide** 📖\n\n"
+        "🔹 **How the bot works:**\n"
+        "🔹 Automatically removes abusive messages.\n"
+        "🔹 Issues warnings for inappropriate words.\n"
+        "🔹 Users who continue abusing will be muted or banned.\n\n"
+        "⚙️ **Admin Commands:**\n"
+        "✅ `/auth` - Allow a user to send messages without deletion (Admin Only).\n"
+        "✅ This bot protects the chat 24/7 without manual intervention.\n\n"
+        "📢 **Join our support group for more details!**"
+    )
+    await query.message.reply_text(help_text, parse_mode="Markdown")
+
 async def handle_new_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     if chat_id not in GROUP_IDS:
@@ -150,30 +167,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except telegram.error.BadRequest:
                 logger.warning(f"Failed to mute/ban {user.id} in chat {chat_id}")
 
-async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message.reply_to_message:
-        await update.message.reply_text("❌ Please reply to a user's message to authorize them.")
-        return
-
-    chat_id = update.message.chat_id
-    admin_id = update.message.from_user.id
-    user_id = update.message.reply_to_message.from_user.id
-    user_name = update.message.reply_to_message.from_user.first_name
-
-    if not await is_admin(update, admin_id):
-        await update.message.reply_text("🚫 Only group admins can use this command!")
-        return
-
-    if chat_id not in AUTHORIZED_USERS:
-        AUTHORIZED_USERS[chat_id] = set()
-    
-    AUTHORIZED_USERS[chat_id].add(user_id)
-    await update.message.reply_text(f"✅ {user_name} is now authorized. Their messages won't be deleted.")
-
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("auth", auth))
+    app.add_handler(CallbackQueryHandler(help_button, pattern="help"))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_group))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("🤖 Bot is running...")
@@ -181,4 +178,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                           
