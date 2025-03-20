@@ -3,3 +3,4 @@ python-dotenv
 asyncio
 motor
 pymongo
+requests
