@@ -3,10 +3,15 @@ import logging
 import os
 import random
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
-from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
-import telegram.error
 from dotenv import load_dotenv
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
+)
+from telegram.ext import (
+    Application, MessageHandler, CommandHandler, CallbackQueryHandler,
+    filters, ContextTypes
+)
+import telegram.error
 
 load_dotenv()
 
@@ -45,7 +50,6 @@ def load_abusive_words():
                 return set(word.strip().lower() for word in f.readlines() if word.strip())
         except Exception as e:
             logger.error(f"Failed to load abusive words: {e}")
-            return set()
     return set()
 
 ABUSIVE_WORDS = load_abusive_words()
@@ -57,7 +61,6 @@ def load_groups():
                 return {int(line.strip()) for line in f.readlines() if line.strip().isdigit()}
         except Exception as e:
             logger.error(f"Failed to load group IDs: {e}")
-            return set()
     return set()
 
 def save_groups(groups):
@@ -78,16 +81,14 @@ async def is_admin(update: Update, user_id: int):
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
-    ]
+    keyboard = [[InlineKeyboardButton("ℹ️ Help", callback_data="help")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     start_message = (
         "🚨 **Anti-Abuse Bot Active!** 🚨\n\n"
-        "This bot automatically detects and deletes abusive messages from the chat. "
-        "If you use offensive language, you will receive warnings, and repeated violations may lead to a mute or ban.\n\n"
-        "📢 **Let's keep our chat clean and friendly!** ✨"
+        "This bot detects and deletes abusive messages. "
+        "Repeated violations will result in mutes or bans.\n\n"
+        "📢 **Keep the chat clean and friendly!** ✨"
     )
     await update.message.reply_text(start_message, parse_mode="Markdown", reply_markup=reply_markup)
 
@@ -123,18 +124,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         level = min(user_warnings[user.id], 10)
         warning_text = WARNING_MESSAGES[level].format(user=user.first_name)
 
-        await update.message.reply_text(warning_text)
+        await context.bot.send_message(chat_id, text=warning_text)
 
-        if level >= 6:
+        if level == 6:
             try:
-                if level == 6:
-                    await context.bot.restrict_chat_member(chat_id, user.id, can_send_messages=False)
-                    await update.message.reply_text(f"🔇 {user.first_name} has been muted for repeated violations!")
-                elif level >= 9:
-                    await context.bot.ban_chat_member(chat_id, user.id)
-                    await update.message.reply_text(f"🚷 {user.first_name} has been banned for breaking the rules!")
+                await context.bot.restrict_chat_member(chat_id, user.id, can_send_messages=False)
+                await context.bot.send_message(chat_id, text=f"🔇 {user.first_name} has been muted!")
             except telegram.error.BadRequest:
-                logger.warning(f"Failed to mute/ban {user.id} in chat {chat_id}")
+                logger.warning(f"Failed to mute {user.id} in chat {chat_id}")
+
+        elif level >= 9:
+            try:
+                await context.bot.ban_chat_member(chat_id, user.id)
+                await context.bot.send_message(chat_id, text=f"🚷 {user.first_name} has been banned!")
+            except telegram.error.BadRequest:
+                logger.warning(f"Failed to ban {user.id} in chat {chat_id}")
 
 async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
@@ -158,7 +162,6 @@ async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    chat_id = query.message.chat_id
 
     if query.data == "help":
         help_message = (
@@ -167,15 +170,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🔹 Users receive warnings for violations.\n"
             "🔹 Severe cases result in mutes or bans.\n\n"
             "👮 **Admin Commands:**\n"
-            "✔️ `/auth` - Allow a user to bypass auto-deletion.\n\n"
-            "🔄 Click 'Back' to return."
+            "✔️ `/auth` - Allow a user to bypass auto-deletion."
         )
         keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="back")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(help_message, parse_mode="Markdown", reply_markup=reply_markup)
-
-    elif query.data == "back":
-        await start(update, context)
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -184,10 +183,9 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_group))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button_handler))
-    
-    print("🤖 Bot is running...")
+
+    logger.info("🤖 Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-        
