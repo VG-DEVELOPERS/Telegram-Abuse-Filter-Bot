@@ -158,7 +158,13 @@ async def back_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     await query.message.edit_text(start_message, parse_mode="Markdown", reply_markup=reply_markup)
-
+async def handle_new_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    if chat_id not in GROUP_IDS:
+        GROUP_IDS.add(chat_id)
+        save_groups(GROUP_IDS)
+        await update.message.reply_text("✅ This group is now protected by the Anti-Abuse Bot!")
+        
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
