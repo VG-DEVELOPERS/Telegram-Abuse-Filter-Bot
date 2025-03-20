@@ -1,7 +1,7 @@
-import asyncio
-import logging
 import os
+import logging
 import re
+import motor.motor_asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
 from telegram.ext import Application, MessageHandler, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 import telegram.error
@@ -9,20 +9,21 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+MONGO_URI = "mongodb+srv://botmaker9675208:botmaker9675208@cluster0.sc9mq8b.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 7563434309
-ALLOWED_USERS = {OWNER_ID, 123456789, 987654321}
+client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+db = client["AntiAbuseBot"]
+users_collection = db["users"]
+groups_collection = db["groups"]
+authorized_users_collection = db["authorized_users"]
 
-GROUPS_FILE = "groups.txt"
 ABUSE_FILE = "abuse.txt"
 
 USER_WARNINGS = {}
-AUTHORIZED_USERS = {}
 
 WARNING_MESSAGES = {
     1: "⚠️ {user}, please keep it respectful!",
@@ -56,17 +57,40 @@ async def is_admin(update: Update, user_id: int):
     except telegram.error.BadRequest:
         return False
 
+async def is_owner(update: Update, user_id: int):
+    try:
+        chat_member = await update.effective_chat.get_member(user_id)
+        return chat_member.status == ChatMember.OWNER
+    except telegram.error.BadRequest:
+        return False
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    user_name = update.message.from_user.first_name
+
+    existing_user = await users_collection.find_one({"user_id": user_id})
+    if not existing_user:
+        await users_collection.insert_one({"user_id": user_id, "user_name": user_name})
+
     keyboard = [[InlineKeyboardButton("ℹ️ Help", callback_data="help")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     start_message = (
         "🚨 **Anti-Abuse Bot Active!** 🚨\n\n"
-        "This bot automatically detects and deletes abusive messages. "
+        "This bot automatically detects and deletes abusive messages from the chat. "
         "If you use offensive language, you will receive warnings, and repeated violations may lead to a mute or ban.\n\n"
         "📢 **Let's keep our chat clean and friendly!** ✨"
     )
     await update.message.reply_text(start_message, parse_mode="Markdown", reply_markup=reply_markup)
+
+async def handle_new_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    existing_group = await groups_collection.find_one({"group_id": chat_id})
+
+    if not existing_group:
+        await groups_collection.insert_one({"group_id": chat_id})
+
+    await update.message.reply_text("✅ This group is now protected by the Anti-Abuse Bot!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -75,7 +99,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     user = update.message.from_user
 
-    if chat_id in AUTHORIZED_USERS and user.id in AUTHORIZED_USERS[chat_id]:
+    authorized = await authorized_users_collection.find_one({"group_id": chat_id, "user_id": user.id})
+    if authorized:
         return
 
     message_words = re.findall(r'\b\w+\b', update.message.text.lower())
@@ -91,21 +116,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         USER_WARNINGS[chat_id] = user_warnings
 
         level = min(user_warnings[user.id], 10)
-        mention = f"[{user.first_name}](tg://openmessage?user_id={user.id})"
-        warning_text = WARNING_MESSAGES[level].format(user=mention)
+        warning_text = WARNING_MESSAGES[level].format(user=user.first_name)
 
-        await context.bot.send_message(chat_id, text=warning_text, parse_mode="Markdown")
-
-        if level >= 6:
-            try:
-                if level == 6:
-                    await context.bot.restrict_chat_member(chat_id, user.id, can_send_messages=False)
-                    await context.bot.send_message(chat_id, f"🔇 {mention} has been muted for repeated violations!", parse_mode="Markdown")
-                elif level >= 9:
-                    await context.bot.ban_chat_member(chat_id, user.id)
-                    await context.bot.send_message(chat_id, f"🚷 {mention} has been banned for breaking the rules!", parse_mode="Markdown")
-            except telegram.error.BadRequest:
-                logger.warning(f"Failed to mute/ban {user.id} in chat {chat_id}")
+        await update.message.reply_text(warning_text)
 
 async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
@@ -114,71 +127,67 @@ async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_id = update.message.chat_id
     admin_id = update.message.from_user.id
-    user = update.message.reply_to_message.from_user
+    user_id = update.message.reply_to_message.from_user.id
+    user_name = update.message.reply_to_message.from_user.first_name
 
     if not await is_admin(update, admin_id):
         await update.message.reply_text("🚫 Only group admins can use this command!")
         return
 
-    if chat_id not in AUTHORIZED_USERS:
-        AUTHORIZED_USERS[chat_id] = set()
-    
-    AUTHORIZED_USERS[chat_id].add(user.id)
-    mention = f"[{user.first_name}](tg://openmessage?user_id={user.id})"
-    await update.message.reply_text(f"✅ {mention} is now authorized. Their messages won't be deleted.", parse_mode="Markdown")
+    await authorized_users_collection.update_one(
+        {"group_id": chat_id, "user_id": user_id},
+        {"$set": {"user_name": user_name}},
+        upsert=True
+    )
+    await update.message.reply_text(f"✅ [{user_name}](tg://openmessage?user_id={user_id}) is now authorized.", parse_mode="Markdown")
 
 async def unauth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
-        await update.message.reply_text("❌ Please reply to a user's message to remove their authorization.")
+        await update.message.reply_text("❌ Please reply to a user's message to unauthorize them.")
         return
 
     chat_id = update.message.chat_id
     admin_id = update.message.from_user.id
-    user = update.message.reply_to_message.from_user
+    user_id = update.message.reply_to_message.from_user.id
 
     if not await is_admin(update, admin_id):
         await update.message.reply_text("🚫 Only group admins can use this command!")
         return
 
-    if chat_id in AUTHORIZED_USERS and user.id in AUTHORIZED_USERS[chat_id]:
-        AUTHORIZED_USERS[chat_id].remove(user.id)
-        mention = f"[{user.first_name}](tg://openmessage?user_id={user.id})"
-        await update.message.reply_text(f"❌ {mention} is no longer authorized. Their messages will now be monitored.", parse_mode="Markdown")
-    else:
-        await update.message.reply_text("ℹ️ This user was not authorized.")
+    await authorized_users_collection.delete_one({"group_id": chat_id, "user_id": user_id})
+    await update.message.reply_text(f"❌ User has been unauthorized.")
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
+async def authadmin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    sender_id = update.message.from_user.id
 
-    if query.data == "help":
-        help_message = (
-            "🆘 **Help Guide**\n\n"
-            "🔹 This bot automatically deletes abusive messages.\n"
-            "🔹 Users receive warnings for violations.\n"
-            "🔹 Severe cases result in mutes or bans.\n\n"
-            "👮 **Admin Commands:**\n"
-            "✔️ `/auth` - Allow a user to bypass auto-deletion.\n"
-            "❌ `/unauth` - Remove a user from authorized list.\n\n"
-            "🔄 Click 'Back' to return."
-        )
-        keyboard = [[InlineKeyboardButton("⬅️ Back", callback_data="back")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(help_message, parse_mode="Markdown", reply_markup=reply_markup)
+    if not await is_owner(update, sender_id):
+        await update.message.reply_text("🚫 Only the **group owner** can use this command!", parse_mode="Markdown")
+        return
 
-    elif query.data == "back":
-        await start(update, context)
+    admins = await context.bot.get_chat_administrators(chat_id)
+    for admin in admins:
+        if admin.user.id != sender_id:
+            await authorized_users_collection.update_one(
+                {"group_id": chat_id, "user_id": admin.user.id},
+                {"$set": {"user_name": admin.user.first_name}},
+                upsert=True
+            )
+
+    await update.message.reply_text("✅ All admins have been authorized.")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("auth", auth))
     app.add_handler(CommandHandler("unauth", unauth))
+    app.add_handler(CommandHandler("authadmin", authadmin))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_group))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    
+
     print("🤖 Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-    
+        
