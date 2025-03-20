@@ -57,7 +57,7 @@ python bot.py
 💙 **Special Thanks To:**  
 - 🌀 [@Sukuna_dev](https://t.me/Sukuna_dev)  
 - 🔥 [@Tanjiro_dev](https://t.me/Tanjiro_dev)  
-
+- ⚡ [@shashankxingh](https://t.me/shashankxingh)
 ---
 
 ## 📡 Contact & Support  
