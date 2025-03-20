@@ -3,7 +3,7 @@ import logging
 import os
 import random
 import re
-from telegram import Update, ChatMember
+from telegram import Update, ChatMember, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 import telegram.error
 from dotenv import load_dotenv
@@ -79,6 +79,13 @@ async def is_admin(update: Update, user_id: int):
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("❓ Help", callback_data="help")],
+        [InlineKeyboardButton("📢 Support", url="https://t.me/Gaming_World_Update")],
+        [InlineKeyboardButton("🔄 Updates", url="https://t.me/Gaming_World_Update")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     start_message = (
         "🚨 **Anti-Abuse Bot Active!** 🚨\n\n"
         "This bot automatically detects and deletes abusive messages from the chat. "
@@ -96,7 +103,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✔️ **Admins can use `/auth` to allow a user to bypass message deletion.**\n\n"
         "📢 **Let's keep our chat clean and friendly!** ✨"
     )
-    await update.message.reply_text(start_message, parse_mode="Markdown")
+    await update.message.reply_text(start_message, parse_mode="Markdown", reply_markup=reply_markup)
 
 async def handle_new_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
@@ -174,4 +181,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-      
+                           
