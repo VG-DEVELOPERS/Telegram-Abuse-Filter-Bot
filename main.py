@@ -184,7 +184,7 @@ def main():
     app.add_handler(CommandHandler("admin", admin_control))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_group))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.Sticker.ALL | filters.VIDEO.ALL, detect_nsfw))
+    app.add_handler(MessageHandler(filters.Sticker.ALL | filters.VIDEO, detect_nsfw))
     app.add_handler(CallbackQueryHandler(button_handler))
     
     app.run_polling()
