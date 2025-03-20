@@ -128,6 +128,44 @@ async def help_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.message.edit_text(help_text, parse_mode="Markdown", reply_markup=reply_markup)
 
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
+    chat_id = update.message.chat_id
+    user = update.message.from_user
+
+    if chat_id in AUTHORIZED_USERS and user.id in AUTHORIZED_USERS[chat_id]:
+        return
+
+    message_words = re.findall(r'\b\w+\b', update.message.text.lower())
+
+    if any(word in ABUSIVE_WORDS for word in message_words):
+        try:
+            await update.message.delete()
+        except telegram.error.BadRequest:
+            logger.warning(f"Failed to delete message in chat {chat_id}")
+
+        user_warnings = USER_WARNINGS.get(chat_id, {})
+        user_warnings[user.id] = user_warnings.get(user.id, 0) + 1
+        USER_WARNINGS[chat_id] = user_warnings
+
+        level = min(user_warnings[user.id], 10)
+        warning_text = WARNING_MESSAGES[level].format(user=user.first_name)
+
+        await update.message.reply_text(warning_text)
+
+        if level >= 6:
+            try:
+                if level == 6:
+                    await context.bot.restrict_chat_member(chat_id, user.id, can_send_messages=False)
+                    await update.message.reply_text(f"🔇 {user.first_name} has been muted for repeated violations!")
+                elif level >= 9:
+                    await context.bot.ban_chat_member(chat_id, user.id)
+                    await update.message.reply_text(f"🚷 {user.first_name} has been banned for breaking the rules!")
+            except telegram.error.BadRequest:
+                logger.warning(f"Failed to mute/ban {user.id} in chat {chat_id}")
+                
 async def back_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
