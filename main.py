@@ -179,7 +179,7 @@ async def unauth(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await authorized_users_collection.delete_one({"group_id": chat_id, "user_id": user_id})
-    await update.message.reply_text("❌ User has been unauthorized.")
+    await update.message.reply_text("❌ {mention} User has been unauthorized.")
 
 async def block(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Only the bot owner (you) can use this command
