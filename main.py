@@ -2,7 +2,7 @@ import os
 import logging
 import re
 import motor.motor_asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember, ParseMode
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 import telegram.error
 from dotenv import load_dotenv
@@ -22,23 +22,23 @@ groups_collection = db["groups"]
 authorized_users_collection = db["authorized_users"]
 
 OWNER_ID = 7563434309
-ALLOWED_USERS = {7563434309, 7717913705}  
+ALLOWED_USERS = {7563434309, 7717913705}  # Add your allowed users
 
 ABUSE_FILE = "abuse.txt"
 
 USER_WARNINGS = {}
 
 WARNING_MESSAGES = {
-    1: "⚠️ {user}, please keep it respectful!",
-    2: "⛔ {user}, second warning! Watch your words.",
-    3: "🚦 {user}, you're on thin ice! Final warning.",
-    4: "🛑 {user}, stop now, or you will be muted!",
-    5: "🚷 {user}, last chance before removal!",
-    6: "🔇 {user}, you've been muted for repeated violations!",
-    7: "🚫 {user}, you’ve crossed the line. Consider this a final notice!",
-    8: "☢️ {user}, next time, you're banned!",
-    9: "⚰️ {user}, you’re getting removed now!",
-    10: "🔥 {user}, you are banned from this group!"
+    1: "⚠️ {mention}, please keep it respectful!",
+    2: "⛔ {mention}, second warning! Watch your words.",
+    3: "🚦 {mention}, you're on thin ice! Final warning.",
+    4: "🛑 {mention}, stop now, or you will be muted!",
+    5: "🚷 {mention}, last chance before removal!",
+    6: "🔇 {mention}, you've been muted for repeated violations!",
+    7: "🚫 {mention}, you’ve crossed the line. Consider this a final notice!",
+    8: "☢️ {mention}, next time, you're banned!",
+    9: "⚰️ {mention}, you’re getting removed now!",
+    10: "🔥 {mention}, you are banned from this group!"
 }
 
 def load_abusive_words():
@@ -55,7 +55,7 @@ ABUSIVE_WORDS = load_abusive_words()
 
 async def is_admin(update: Update, user_id: int):
     if user_id in ALLOWED_USERS:
-        return True  
+        return True
     try:
         chat_member = await update.effective_chat.get_member(user_id)
         return chat_member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
@@ -64,7 +64,7 @@ async def is_admin(update: Update, user_id: int):
 
 async def is_owner(update: Update, user_id: int):
     if user_id in ALLOWED_USERS:
-        return True  
+        return True
     try:
         chat_member = await update.effective_chat.get_member(user_id)
         return chat_member.status == ChatMember.OWNER
@@ -87,7 +87,10 @@ async def handle_new_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not existing_group:
         await groups_collection.insert_one({"group_id": chat_id, "filtering": True})
 
-    await update.message.reply_text("✅ This group is now protected by the Anti-Abuse Bot!")
+    await update.message.reply_text(
+        "✅ This group is now protected by the Anti-Abuse Bot!\n\n"
+        "Please ensure I have 'can_delete_messages' admin rights to function properly."
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -104,22 +107,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if authorized:
         return
 
+    # Normalize the message to lowercase and split into words
     message_words = re.findall(r'\b\w+\b', update.message.text.lower())
 
+    # Check for exact match in the abusive words list
     if any(word in ABUSIVE_WORDS for word in message_words):
         try:
             await update.message.delete()
         except telegram.error.BadRequest:
             logger.warning(f"Failed to delete message in chat {chat_id}")
 
-        user_warnings = USER_WARNINGS.get(chat_id, {})
-        user_warnings[user.id] = user_warnings.get(user.id, 0) + 1
-        USER_WARNINGS[chat_id] = user_warnings
-
-        level = min(user_warnings[user.id], 10)
-        warning_text = WARNING_MESSAGES[level].format(user=user.first_name)
-
-        await update.message.reply_text(warning_text)
+        mention = f"[{user.first_name}](tg://user?id={user.id})"
+        warning_text = WARNING_MESSAGES.get(1, "⚠️ {mention}, please keep it respectful!").format(mention=mention)
+        await update.message.reply_text(warning_text, parse_mode=ParseMode.MARKDOWN)
 
 async def admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -143,7 +143,7 @@ async def admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status = "✅ Abuse filtering is now **ENABLED**!" if filtering else "❌ Abuse filtering is now **DISABLED**!"
     await update.message.reply_text(status, parse_mode="Markdown")
-    
+
 async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
         await update.message.reply_text("❌ Reply to a user's message to authorize them.")
@@ -181,12 +181,24 @@ async def unauth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await authorized_users_collection.delete_one({"group_id": chat_id, "user_id": user_id})
     await update.message.reply_text("❌ User has been unauthorized.")
 
+async def block(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only the bot owner (you) can use this command
+    if update.message.from_user.id != OWNER_ID:
+        await update.message.reply_text("🚫 You do not have permission to use this command.")
+        return
+
+    chat_id = update.message.chat_id
+    # Leave the group and prevent the bot from rejoining
+    await update.message.reply_text("🚫 You have blocked this group. I will now leave and won't join again.")
+    await update.message.bot.leave_chat(chat_id)
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin_control))
     app.add_handler(CommandHandler("auth", auth))
     app.add_handler(CommandHandler("unauth", unauth))
+    app.add_handler(CommandHandler("block", block))  # Added block command
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_new_group))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
@@ -195,4 +207,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
